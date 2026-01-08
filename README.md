@@ -2,8 +2,8 @@
 Pacman hra v pythonu jako projekt na semestriální projekt do programování. Jedná se historickou klasiku, kterou jsem přetvořil celou do pythonu! Není to tak lehké jak se zdá, tak se neboj a pojď si to vyzkoušet!
 
 ### Požadavky
-Python v 3.14.2 (Zkoušeno na této verzi)
-Pygame-ce (kompatibilní s python 3.14+)
+- Python v 3.14.2 (Zkoušeno na této verzi) [Klikni zde pro stažení](https://www.python.org/downloads/)
+- Pygame-ce (kompatibilní s python 3.14+)
 
 ## Jak hrát?
 1. Stáhni repozitář a vlož například na plochu

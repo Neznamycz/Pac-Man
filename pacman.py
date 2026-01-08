@@ -1,4 +1,3 @@
-# Build Pac-Man from Scratch in Python with PyGame!!
 import copy
 from board import boards
 import pygame
@@ -41,7 +40,7 @@ clyde_y = 438
 clyde_direction = 2
 counter = 0
 flicker = False
-# R, L, U, D
+# R - doprava, L - doleva, U - nahoru, D - dolů
 turns_allowed = [False, False, False, False]
 direction_command = 0
 player_speed = 2
@@ -168,7 +167,7 @@ class Ghost:
 
     def move_clyde(self):
         # r, l, u, d
-        # clyde is going to turn whenever advantageous for pursuit
+        # Clyde se bude otáčet, kdykoli je to výhodné pro pronásledování
         if self.direction == 0:
             if self.target[0] > self.x_pos and self.turns[0]:
                 self.x_pos += self.speed
@@ -307,7 +306,7 @@ class Ghost:
 
     def move_blinky(self):
         # r, l, u, d
-        # blinky is going to turn whenever colliding with walls, otherwise continue straight
+        # Blinky se bude otáčet pouze při kolizi se zdmi, jinak jede rovně
         if self.direction == 0:
             if self.target[0] > self.x_pos and self.turns[0]:
                 self.x_pos += self.speed
@@ -413,7 +412,7 @@ class Ghost:
 
     def move_inky(self):
         # r, l, u, d
-        # inky turns up or down at any point to pursue, but left and right only on collision
+        # Inky se může otáčet nahoru nebo dolů kdykoliv kvůli pronásledování, ale vlevo/vpravo jen při kolizi
         if self.direction == 0:
             if self.target[0] > self.x_pos and self.turns[0]:
                 self.x_pos += self.speed
@@ -535,7 +534,7 @@ class Ghost:
 
     def move_pinky(self):
         # r, l, u, d
-        # inky is going to turn left or right whenever advantageous, but only up or down on collision
+        # Pinky se bude otáčet vlevo nebo vpravo, když je to výhodné, ale nahoru/dolů pouze při kolizi
         if self.direction == 0:
             if self.target[0] > self.x_pos and self.turns[0]:
                 self.x_pos += self.speed
@@ -660,7 +659,7 @@ class Ghost:
 
 
 def draw_misc():
-    score_text = font.render(f'Score: {score}', True, 'white')
+    score_text = font.render(f'Skóre: {score}', True, 'white')
     screen.blit(score_text, (10, 920))
     if powerup:
         pygame.draw.circle(screen, 'blue', (140, 930), 15)
@@ -669,12 +668,12 @@ def draw_misc():
     if game_over:
         pygame.draw.rect(screen, 'white', [50, 200, 800, 300],0, 10)
         pygame.draw.rect(screen, 'dark gray', [70, 220, 760, 260], 0, 10)
-        gameover_text = font.render('Game over! Space bar to restart!', True, 'red')
+        gameover_text = font.render('Game over! Stiskni MEZERNÍK pro restart!', True, 'red')
         screen.blit(gameover_text, (100, 300))
     if game_won:
         pygame.draw.rect(screen, 'white', [50, 200, 800, 300],0, 10)
         pygame.draw.rect(screen, 'dark gray', [70, 220, 760, 260], 0, 10)
-        gameover_text = font.render('Victory! Space bar to restart!', True, 'green')
+        gameover_text = font.render('Victory! Stiskni MEZERNÍK pro restart!', True, 'green')
         screen.blit(gameover_text, (100, 300))
 
 
@@ -728,7 +727,7 @@ def draw_board():
 
 
 def draw_player():
-    # 0-RIGHT, 1-LEFT, 2-UP, 3-DOWN
+    # 0 - doprava, 1 - doleva, 2 - nahoru, 3 - dolů
     if direction == 0:
         screen.blit(player_images[counter // 5], (player_x, player_y))
     elif direction == 1:
@@ -744,7 +743,7 @@ def check_position(centerx, centery):
     num1 = (HEIGHT - 50) // 32
     num2 = (WIDTH // 30)
     num3 = 15
-    # check collisions based on center x and center y of player +/- fudge number
+    # kontroluje kolize podle středu hráče (x, y) ± posun
     if centerx // 30 < 29:
         if direction == 0:
             if level[centery // num1][(centerx - num3) // num2] < 3:
@@ -789,7 +788,7 @@ def check_position(centerx, centery):
 
 
 def move_player(play_x, play_y):
-    # r, l, u, d
+    # r - vpravo, l - vlevo, u - nahoru, d - dolů
     if direction == 0 and turns_allowed[0]:
         play_x += player_speed
     elif direction == 1 and turns_allowed[1]:
@@ -1220,4 +1219,4 @@ while run:
 pygame.quit()
 
 
-# sound effects, restart and winning messages
+# zvukové efekty, restart a hlášky o výhře
