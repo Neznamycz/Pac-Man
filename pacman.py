@@ -2,12 +2,55 @@ import copy
 from board import boards
 import pygame
 import math
+import json
+import os
 
 pygame.init()
 
-WIDTH = 900
-HEIGHT = 950
-screen = pygame.display.set_mode([WIDTH, HEIGHT])
+# Dostupná rozlišení (v poměru 900:950)
+AVAILABLE_RESOLUTIONS = [
+    (900, 950),
+    (1080, 1140),
+    (1260, 1330),
+    (1440, 1520)
+]
+
+# Načtení nastavení
+def load_settings():
+    default_settings = {
+        'resolution': 0,  # Index do AVAILABLE_RESOLUTIONS
+        'fullscreen': False
+    }
+    if os.path.exists('settings.json'):
+        try:
+            with open('settings.json', 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+                # Ověřit validitu
+                if 'resolution' not in settings or settings['resolution'] >= len(AVAILABLE_RESOLUTIONS):
+                    settings['resolution'] = 0
+                if 'fullscreen' not in settings:
+                    settings['fullscreen'] = False
+                return settings
+        except:
+            return default_settings
+    return default_settings
+
+def save_settings(settings):
+    with open('settings.json', 'w', encoding='utf-8') as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+
+def apply_settings(settings):
+    global WIDTH, HEIGHT, screen
+    WIDTH, HEIGHT = AVAILABLE_RESOLUTIONS[settings['resolution']]
+    flags = (pygame.FULLSCREEN | pygame.SCALED) if settings['fullscreen'] else 0
+    screen = pygame.display.set_mode([WIDTH, HEIGHT], flags)
+    pygame.display.set_caption('PAC-MAN')
+
+game_settings = load_settings()
+
+WIDTH, HEIGHT = AVAILABLE_RESOLUTIONS[game_settings['resolution']]
+screen = pygame.display.set_mode([WIDTH, HEIGHT], (pygame.FULLSCREEN | pygame.SCALED) if game_settings['fullscreen'] else 0)
+pygame.display.set_caption('PAC-MAN')
 timer = pygame.time.Clock()
 fps = 60
 font = pygame.font.Font('freesansbold.ttf', 20)
@@ -62,7 +105,40 @@ ghost_speeds = [2, 2, 2, 2]
 startup_counter = 0
 lives = 3
 game_over = False
-game_won = False
+main_menu = True
+show_scoreboard = False
+show_settings = False
+entering_name = False
+player_name = ""
+current_level = 1
+
+# Načtení scoreboardu
+def load_scoreboard():
+    if os.path.exists('scoreboard.json'):
+        with open('scoreboard.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return []
+
+def save_scoreboard(scores):
+    with open('scoreboard.json', 'w', encoding='utf-8') as f:
+        json.dump(scores, f, ensure_ascii=False, indent=2)
+
+def is_top_10(current_score, scores):
+    if len(scores) < 10:
+        return True
+    return current_score > scores[-1]['score']
+
+def get_power_duration(level_num):
+    # Začíná na 600 (10 sekund), snižuje se o 30 každý level, minimum 180 (3 sekundy)
+    duration = 600 - ((level_num - 1) * 30)
+    return max(duration, 180)
+
+def get_ghost_base_speed(level_num):
+    # Začíná na 2, zvyšuje se o 0.1 každý level, maximum 4
+    speed = 2 + ((level_num - 1) * 0.1)
+    return min(speed, 4)
+
+scoreboard = load_scoreboard()
 
 
 class Ghost:
@@ -97,63 +173,66 @@ class Ghost:
         num2 = (WIDTH // 30)
         num3 = 15
         self.turns = [False, False, False, False]
-        if 0 < self.center_x // 30 < 29:
-            if level[(self.center_y - num3) // num1][self.center_x // num2] == 9:
+        # Konverze na int pro správné indexování
+        center_x_int = int(self.center_x)
+        center_y_int = int(self.center_y)
+        if 0 < center_x_int // 30 < 29:
+            if level[(center_y_int - num3) // num1][center_x_int // num2] == 9:
                 self.turns[2] = True
-            if level[self.center_y // num1][(self.center_x - num3) // num2] < 3 \
-                    or (level[self.center_y // num1][(self.center_x - num3) // num2] == 9 and (
+            if level[center_y_int // num1][(center_x_int - num3) // num2] < 3 \
+                    or (level[center_y_int // num1][(center_x_int - num3) // num2] == 9 and (
                     self.in_box or self.dead)):
                 self.turns[1] = True
-            if level[self.center_y // num1][(self.center_x + num3) // num2] < 3 \
-                    or (level[self.center_y // num1][(self.center_x + num3) // num2] == 9 and (
+            if level[center_y_int // num1][(center_x_int + num3) // num2] < 3 \
+                    or (level[center_y_int // num1][(center_x_int + num3) // num2] == 9 and (
                     self.in_box or self.dead)):
                 self.turns[0] = True
-            if level[(self.center_y + num3) // num1][self.center_x // num2] < 3 \
-                    or (level[(self.center_y + num3) // num1][self.center_x // num2] == 9 and (
+            if level[(center_y_int + num3) // num1][center_x_int // num2] < 3 \
+                    or (level[(center_y_int + num3) // num1][center_x_int // num2] == 9 and (
                     self.in_box or self.dead)):
                 self.turns[3] = True
-            if level[(self.center_y - num3) // num1][self.center_x // num2] < 3 \
-                    or (level[(self.center_y - num3) // num1][self.center_x // num2] == 9 and (
+            if level[(center_y_int - num3) // num1][center_x_int // num2] < 3 \
+                    or (level[(center_y_int - num3) // num1][center_x_int // num2] == 9 and (
                     self.in_box or self.dead)):
                 self.turns[2] = True
 
             if self.direction == 2 or self.direction == 3:
-                if 12 <= self.center_x % num2 <= 18:
-                    if level[(self.center_y + num3) // num1][self.center_x // num2] < 3 \
-                            or (level[(self.center_y + num3) // num1][self.center_x // num2] == 9 and (
+                if 12 <= center_x_int % num2 <= 18:
+                    if level[(center_y_int + num3) // num1][center_x_int // num2] < 3 \
+                            or (level[(center_y_int + num3) // num1][center_x_int // num2] == 9 and (
                             self.in_box or self.dead)):
                         self.turns[3] = True
-                    if level[(self.center_y - num3) // num1][self.center_x // num2] < 3 \
-                            or (level[(self.center_y - num3) // num1][self.center_x // num2] == 9 and (
+                    if level[(center_y_int - num3) // num1][center_x_int // num2] < 3 \
+                            or (level[(center_y_int - num3) // num1][center_x_int // num2] == 9 and (
                             self.in_box or self.dead)):
                         self.turns[2] = True
-                if 12 <= self.center_y % num1 <= 18:
-                    if level[self.center_y // num1][(self.center_x - num2) // num2] < 3 \
-                            or (level[self.center_y // num1][(self.center_x - num2) // num2] == 9 and (
+                if 12 <= center_y_int % num1 <= 18:
+                    if level[center_y_int // num1][(center_x_int - num2) // num2] < 3 \
+                            or (level[center_y_int // num1][(center_x_int - num2) // num2] == 9 and (
                             self.in_box or self.dead)):
                         self.turns[1] = True
-                    if level[self.center_y // num1][(self.center_x + num2) // num2] < 3 \
-                            or (level[self.center_y // num1][(self.center_x + num2) // num2] == 9 and (
+                    if level[center_y_int // num1][(center_x_int + num2) // num2] < 3 \
+                            or (level[center_y_int // num1][(center_x_int + num2) // num2] == 9 and (
                             self.in_box or self.dead)):
                         self.turns[0] = True
 
             if self.direction == 0 or self.direction == 1:
-                if 12 <= self.center_x % num2 <= 18:
-                    if level[(self.center_y + num3) // num1][self.center_x // num2] < 3 \
-                            or (level[(self.center_y + num3) // num1][self.center_x // num2] == 9 and (
+                if 12 <= center_x_int % num2 <= 18:
+                    if level[(center_y_int + num3) // num1][center_x_int // num2] < 3 \
+                            or (level[(center_y_int + num3) // num1][center_x_int // num2] == 9 and (
                             self.in_box or self.dead)):
                         self.turns[3] = True
-                    if level[(self.center_y - num3) // num1][self.center_x // num2] < 3 \
-                            or (level[(self.center_y - num3) // num1][self.center_x // num2] == 9 and (
+                    if level[(center_y_int - num3) // num1][center_x_int // num2] < 3 \
+                            or (level[(center_y_int - num3) // num1][center_x_int // num2] == 9 and (
                             self.in_box or self.dead)):
                         self.turns[2] = True
-                if 12 <= self.center_y % num1 <= 18:
-                    if level[self.center_y // num1][(self.center_x - num3) // num2] < 3 \
-                            or (level[self.center_y // num1][(self.center_x - num3) // num2] == 9 and (
+                if 12 <= center_y_int % num1 <= 18:
+                    if level[center_y_int // num1][(center_x_int - num3) // num2] < 3 \
+                            or (level[center_y_int // num1][(center_x_int - num3) // num2] == 9 and (
                             self.in_box or self.dead)):
                         self.turns[1] = True
-                    if level[self.center_y // num1][(self.center_x + num3) // num2] < 3 \
-                            or (level[self.center_y // num1][(self.center_x + num3) // num2] == 9 and (
+                    if level[center_y_int // num1][(center_x_int + num3) // num2] < 3 \
+                            or (level[center_y_int // num1][(center_x_int + num3) // num2] == 9 and (
                             self.in_box or self.dead)):
                         self.turns[0] = True
         else:
@@ -661,6 +740,8 @@ class Ghost:
 def draw_misc():
     score_text = font.render(f'Skóre: {score}', True, 'white')
     screen.blit(score_text, (10, 920))
+    level_text = font.render(f'Level: {current_level}', True, 'white')
+    screen.blit(level_text, (350, 920))
     if powerup:
         pygame.draw.circle(screen, 'blue', (140, 930), 15)
     for i in range(lives):
@@ -669,11 +750,6 @@ def draw_misc():
         pygame.draw.rect(screen, 'white', [50, 200, 800, 300],0, 10)
         pygame.draw.rect(screen, 'dark gray', [70, 220, 760, 260], 0, 10)
         gameover_text = font.render('Game over! Stiskni MEZERNÍK pro restart!', True, 'red')
-        screen.blit(gameover_text, (100, 300))
-    if game_won:
-        pygame.draw.rect(screen, 'white', [50, 200, 800, 300],0, 10)
-        pygame.draw.rect(screen, 'dark gray', [70, 220, 760, 260], 0, 10)
-        gameover_text = font.render('Victory! Stiskni MEZERNÍK pro restart!', True, 'green')
         screen.blit(gameover_text, (100, 300))
 
 
@@ -800,6 +876,157 @@ def move_player(play_x, play_y):
     return play_x, play_y
 
 
+def draw_scoreboard():
+    screen.fill('black')
+    title_font = pygame.font.Font('freesansbold.ttf', 60)
+    title_text = title_font.render('TOP 10', True, 'yellow')
+    screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, 50))
+    
+    score_font = pygame.font.Font('freesansbold.ttf', 30)
+    y_pos = 150
+    
+    for i, entry in enumerate(scoreboard[:10]):
+        rank_text = f"{i+1}. {entry['name']}: {entry['score']}"
+        text_surface = score_font.render(rank_text, True, 'white')
+        screen.blit(text_surface, (150, y_pos))
+        y_pos += 50
+    
+    # Tlačítko zpět
+    back_font = pygame.font.Font('freesansbold.ttf', 35)
+    back_text = back_font.render('Zpět', True, 'white')
+    back_rect = pygame.Rect(WIDTH // 2 - 100, 800, 200, 50)
+    pygame.draw.rect(screen, 'blue', back_rect, 3)
+    screen.blit(back_text, (WIDTH // 2 - back_text.get_width() // 2, 808))
+    
+    return back_rect
+
+
+def draw_name_input(current_score):
+    screen.fill('black')
+    title_font = pygame.font.Font('freesansbold.ttf', 50)
+    title_text = title_font.render('GRATULUJEME!', True, 'yellow')
+    screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, 150))
+    
+    score_font = pygame.font.Font('freesansbold.ttf', 40)
+    score_text = score_font.render(f'Skóre: {current_score}', True, 'white')
+    screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, 250))
+    
+    prompt_font = pygame.font.Font('freesansbold.ttf', 30)
+    prompt_text = prompt_font.render('Zadejte své jméno:', True, 'white')
+    screen.blit(prompt_text, (WIDTH // 2 - prompt_text.get_width() // 2, 350))
+    
+    # Input box
+    input_rect = pygame.Rect(WIDTH // 2 - 200, 420, 400, 60)
+    pygame.draw.rect(screen, 'white', input_rect, 3)
+    
+    name_font = pygame.font.Font('freesansbold.ttf', 35)
+    name_text = name_font.render(player_name, True, 'white')
+    screen.blit(name_text, (WIDTH // 2 - name_text.get_width() // 2, 435))
+    
+    hint_font = pygame.font.Font('freesansbold.ttf', 25)
+    hint_text = hint_font.render('Stiskněte ENTER pro potvrzení', True, 'gray')
+    screen.blit(hint_text, (WIDTH // 2 - hint_text.get_width() // 2, 550))
+
+
+def draw_settings():
+    screen.fill('black')
+    title_font = pygame.font.Font('freesansbold.ttf', 60)
+    title_text = title_font.render('NASTAVEN\u00cd', True, 'yellow')
+    screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, 50))
+    
+    settings_font = pygame.font.Font('freesansbold.ttf', 35)
+    
+    # Rozlišení
+    res_label = settings_font.render('Rozli\u0161en\u00ed:', True, 'white')
+    screen.blit(res_label, (150, 200))
+    
+    resolution_rects = []
+    for i, (w, h) in enumerate(AVAILABLE_RESOLUTIONS):
+        y_pos = 270 + i * 70
+        res_text = settings_font.render(f'{w}x{h}', True, 'white')
+        res_rect = pygame.Rect(200, y_pos, 500, 50)
+        
+        if game_settings['resolution'] == i:
+            pygame.draw.rect(screen, 'green', res_rect, 3)
+            pygame.draw.circle(screen, 'green', (180, y_pos + 25), 8)
+        else:
+            pygame.draw.rect(screen, 'gray', res_rect, 3)
+            pygame.draw.circle(screen, 'gray', (180, y_pos + 25), 8, 2)
+        
+        if False:  # Skryto - rozlišení není viditelné
+            screen.blit(res_text, (220, y_pos + 8))
+    
+    # Fullscreen
+    fullscreen_y = 270 + len(AVAILABLE_RESOLUTIONS) * 70 + 30
+    fs_label = settings_font.render('Re\u017eim:', True, 'white')
+    screen.blit(fs_label, (150, fullscreen_y))
+    
+    fs_rect = pygame.Rect(200, fullscreen_y + 70, 500, 50)
+    fs_text = settings_font.render(
+        'Fullscreen' if game_settings['fullscreen'] else 'Windowed',
+        True, 'white'
+    )
+    
+    if game_settings['fullscreen']:
+        pygame.draw.rect(screen, 'green', fs_rect, 3)
+    else:
+        pygame.draw.rect(screen, 'blue', fs_rect, 3)
+    
+    screen.blit(fs_text, (WIDTH // 2 - fs_text.get_width() // 2, fullscreen_y + 78))
+    
+    apply_rect = pygame.Rect(WIDTH // 2 - 250, HEIGHT - 150, 200, 50)
+    back_rect = pygame.Rect(WIDTH // 2 + 50, HEIGHT - 150, 200, 50)
+    
+    pygame.draw.rect(screen, 'green', apply_rect, 3)
+    pygame.draw.rect(screen, 'red', back_rect, 3)
+    
+    button_font = pygame.font.Font('freesansbold.ttf', 30)
+    apply_text = button_font.render('Pou\u017e\u00edt', True, 'white')
+    back_text = button_font.render('Zp\u011bt', True, 'white')
+    
+    screen.blit(apply_text, (WIDTH // 2 - 250 + (200 - apply_text.get_width()) // 2, HEIGHT - 142))
+    screen.blit(back_text, (WIDTH // 2 + 50 + (200 - back_text.get_width()) // 2, HEIGHT - 142))
+    
+    return resolution_rects, fs_rect, apply_rect, back_rect
+
+
+def draw_menu():
+    screen.fill('black')
+    # Nadpis
+    title_font = pygame.font.Font('freesansbold.ttf', 70)
+    title_text = title_font.render('PAC-MAN', True, 'yellow')
+    screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, 100))
+    
+    # Tlačítka menu
+    menu_font = pygame.font.Font('freesansbold.ttf', 40)
+    
+    # Hrát
+    play_text = menu_font.render('Hrát', True, 'white')
+    play_rect = pygame.Rect(WIDTH // 2 - 150, 300, 300, 60)
+    pygame.draw.rect(screen, 'blue', play_rect, 3)
+    screen.blit(play_text, (WIDTH // 2 - play_text.get_width() // 2, 310))
+    
+    # Scoreboard
+    scoreboard_text = menu_font.render('Scoreboard', True, 'white')
+    scoreboard_rect = pygame.Rect(WIDTH // 2 - 150, 400, 300, 60)
+    pygame.draw.rect(screen, 'green', scoreboard_rect, 3)
+    screen.blit(scoreboard_text, (WIDTH // 2 - scoreboard_text.get_width() // 2, 410))
+    
+    # Nastaveni
+    settings_text = menu_font.render('Nastaven\u00ed', True, 'white')
+    settings_rect = pygame.Rect(WIDTH // 2 - 150, 500, 300, 60)
+    pygame.draw.rect(screen, 'orange', settings_rect, 3)
+    screen.blit(settings_text, (WIDTH // 2 - settings_text.get_width() // 2, 510))
+    
+    # Odejít
+    quit_text = menu_font.render('Odejít', True, 'white')
+    quit_rect = pygame.Rect(WIDTH // 2 - 150, 600, 300, 60)
+    pygame.draw.rect(screen, 'red', quit_rect, 3)
+    screen.blit(quit_text, (WIDTH // 2 - quit_text.get_width() // 2, 610))
+    
+    return play_rect, scoreboard_rect, settings_rect, quit_rect
+
+
 def get_targets(blink_x, blink_y, ink_x, ink_y, pink_x, pink_y, clyd_x, clyd_y):
     if player_x < 450:
         runaway_x = 900
@@ -882,6 +1109,139 @@ def get_targets(blink_x, blink_y, ink_x, ink_y, pink_x, pink_y, clyd_x, clyd_y):
 run = True
 while run:
     timer.tick(fps)
+    
+    if entering_name:
+        # Zadávání jména po hře
+        draw_name_input(score)
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN and len(player_name) > 0:
+                    # Uložit skóre
+                    scoreboard.append({'name': player_name, 'score': score})
+                    scoreboard.sort(key=lambda x: x['score'], reverse=True)
+                    scoreboard = scoreboard[:10]  # Ponechat pouze TOP 10
+                    save_scoreboard(scoreboard)
+                    player_name = ""
+                    entering_name = False
+                    main_menu = True
+                elif event.key == pygame.K_BACKSPACE:
+                    player_name = player_name[:-1]
+                elif event.key != pygame.K_RETURN and len(player_name) < 15:
+                    # Přidat znak
+                    if event.unicode.isprintable():
+                        player_name += event.unicode
+        
+        pygame.display.flip()
+        continue
+    
+    if show_scoreboard:
+        # Zobrazit scoreboard
+        back_rect = draw_scoreboard()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                if back_rect.collidepoint(mouse_pos):
+                    show_scoreboard = False
+                    main_menu = True
+        
+        pygame.display.flip()
+        continue
+    
+    if show_settings:
+        # Zobrazit nastavení
+        resolution_rects, fs_rect, apply_rect, back_rect = draw_settings()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                
+                # Kliknutí na rozlišení - skryto
+                if False:
+                    for i, rect in enumerate(resolution_rects):
+                        if rect.collidepoint(mouse_pos):
+                            game_settings['resolution'] = i
+                
+                # Kliknutí na fullscreen přepínač
+                if fs_rect.collidepoint(mouse_pos):
+                    game_settings['fullscreen'] = not game_settings['fullscreen']
+                
+                # Použít nastavení
+                if apply_rect.collidepoint(mouse_pos):
+                    save_settings(game_settings)
+                    apply_settings(game_settings)
+                    show_settings = False
+                    main_menu = True
+                
+                # Zpět bez uložení
+                if back_rect.collidepoint(mouse_pos):
+                    game_settings = load_settings()  # Načíst původní nastavení
+                    show_settings = False
+                    main_menu = True
+        
+        pygame.display.flip()
+        continue
+    
+    if main_menu:
+        # Zobrazit menu
+        play_rect, scoreboard_rect, settings_rect, quit_rect = draw_menu()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                if play_rect.collidepoint(mouse_pos):
+                    # Reset hry
+                    main_menu = False
+                    score = 0
+                    lives = 3
+                    level = copy.deepcopy(boards)
+                    powerup = False
+                    power_counter = 0
+                    player_x = 450
+                    player_y = 663
+                    direction = 0
+                    direction_command = 0
+                    blinky_x = 56
+                    blinky_y = 58
+                    blinky_direction = 0
+                    inky_x = 440
+                    inky_y = 388
+                    inky_direction = 2
+                    pinky_x = 440
+                    pinky_y = 438
+                    pinky_direction = 2
+                    clyde_x = 440
+                    clyde_y = 438
+                    clyde_direction = 2
+                    eaten_ghost = [False, False, False, False]
+                    blinky_dead = False
+                    inky_dead = False
+                    clyde_dead = False
+                    pinky_dead = False
+                    game_over = False
+                    startup_counter = 0
+                    current_level = 1
+                elif scoreboard_rect.collidepoint(mouse_pos):
+                    main_menu = False
+                    show_scoreboard = True
+                elif settings_rect.collidepoint(mouse_pos):
+                    main_menu = False
+                    show_settings = True
+                elif quit_rect.collidepoint(mouse_pos):
+                    run = False
+        
+        pygame.display.flip()
+        continue
+    
     if counter < 19:
         counter += 1
         if counter > 3:
@@ -889,13 +1249,13 @@ while run:
     else:
         counter = 0
         flicker = True
-    if powerup and power_counter < 600:
+    if powerup and power_counter < get_power_duration(current_level):
         power_counter += 1
-    elif powerup and power_counter >= 600:
+    elif powerup and power_counter >= get_power_duration(current_level):
         power_counter = 0
         powerup = False
         eaten_ghost = [False, False, False, False]
-    if startup_counter < 180 and not game_over and not game_won:
+    if startup_counter < 180 and not game_over:
         moving = False
         startup_counter += 1
     else:
@@ -905,10 +1265,13 @@ while run:
     draw_board()
     center_x = player_x + 23
     center_y = player_y + 24
+    
+    # Rychlost duchů podle levelu
+    base_speed = get_ghost_base_speed(current_level)
     if powerup:
         ghost_speeds = [1, 1, 1, 1]
     else:
-        ghost_speeds = [2, 2, 2, 2]
+        ghost_speeds = [base_speed, base_speed, base_speed, base_speed]
     if eaten_ghost[0]:
         ghost_speeds[0] = 2
     if eaten_ghost[1]:
@@ -926,10 +1289,39 @@ while run:
     if clyde_dead:
         ghost_speeds[3] = 4
 
-    game_won = True
+    level_complete = True
     for i in range(len(level)):
         if 1 in level[i] or 2 in level[i]:
-            game_won = False
+            level_complete = False
+    
+    # Pokud je level dokončen, restart s vyšší obtížností
+    if level_complete:
+        current_level += 1
+        level = copy.deepcopy(boards)
+        powerup = False
+        power_counter = 0
+        player_x = 450
+        player_y = 663
+        direction = 0
+        direction_command = 0
+        blinky_x = 56
+        blinky_y = 58
+        blinky_direction = 0
+        inky_x = 440
+        inky_y = 388
+        inky_direction = 2
+        pinky_x = 440
+        pinky_y = 438
+        pinky_direction = 2
+        clyde_x = 440
+        clyde_y = 438
+        clyde_direction = 2
+        eaten_ghost = [False, False, False, False]
+        blinky_dead = False
+        inky_dead = False
+        clyde_dead = False
+        pinky_dead = False
+        startup_counter = 0
 
     player_circle = pygame.draw.circle(screen, 'black', (center_x, center_y), 20, 2)
     draw_player()
@@ -994,7 +1386,11 @@ while run:
                 clyde_dead = False
                 pinky_dead = False
             else:
-                game_over = True
+                if is_top_10(score, scoreboard):
+                    entering_name = True
+                    game_over = False
+                else:
+                    game_over = True
                 moving = False
                 startup_counter = 0
     if powerup and player_circle.colliderect(blinky.rect) and eaten_ghost[0] and not blinky.dead:
@@ -1025,7 +1421,11 @@ while run:
             clyde_dead = False
             pinky_dead = False
         else:
-            game_over = True
+            if is_top_10(score, scoreboard):
+                entering_name = True
+                game_over = False
+            else:
+                game_over = True
             moving = False
             startup_counter = 0
     if powerup and player_circle.colliderect(inky.rect) and eaten_ghost[1] and not inky.dead:
@@ -1056,7 +1456,11 @@ while run:
             clyde_dead = False
             pinky_dead = False
         else:
-            game_over = True
+            if is_top_10(score, scoreboard):
+                entering_name = True
+                game_over = False
+            else:
+                game_over = True
             moving = False
             startup_counter = 0
     if powerup and player_circle.colliderect(pinky.rect) and eaten_ghost[2] and not pinky.dead:
@@ -1087,7 +1491,11 @@ while run:
             clyde_dead = False
             pinky_dead = False
         else:
-            game_over = True
+            if is_top_10(score, scoreboard):
+                entering_name = True
+                game_over = False
+            else:
+                game_over = True
             moving = False
             startup_counter = 0
     if powerup and player_circle.colliderect(clyde.rect) and eaten_ghost[3] and not clyde.dead:
@@ -1118,7 +1526,11 @@ while run:
             clyde_dead = False
             pinky_dead = False
         else:
-            game_over = True
+            if is_top_10(score, scoreboard):
+                entering_name = True
+                game_over = False
+            else:
+                game_over = True
             moving = False
             startup_counter = 0
     if powerup and player_circle.colliderect(blinky.rect) and not blinky.dead and not eaten_ghost[0]:
@@ -1142,15 +1554,15 @@ while run:
         if event.type == pygame.QUIT:
             run = False
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_RIGHT:
+            if event.key == pygame.K_RIGHT or event.key == pygame.K_d:
                 direction_command = 0
-            if event.key == pygame.K_LEFT:
+            if event.key == pygame.K_LEFT or event.key == pygame.K_a:
                 direction_command = 1
-            if event.key == pygame.K_UP:
+            if event.key == pygame.K_UP or event.key == pygame.K_w:
                 direction_command = 2
-            if event.key == pygame.K_DOWN:
+            if event.key == pygame.K_DOWN or event.key == pygame.K_s:
                 direction_command = 3
-            if event.key == pygame.K_SPACE and (game_over or game_won):
+            if event.key == pygame.K_SPACE and game_over:
                 powerup = False
                 power_counter = 0
                 lives -= 1
@@ -1180,16 +1592,16 @@ while run:
                 lives = 3
                 level = copy.deepcopy(boards)
                 game_over = False
-                game_won = False
+                current_level = 1
 
         if event.type == pygame.KEYUP:
-            if event.key == pygame.K_RIGHT and direction_command == 0:
+            if (event.key == pygame.K_RIGHT or event.key == pygame.K_d) and direction_command == 0:
                 direction_command = direction
-            if event.key == pygame.K_LEFT and direction_command == 1:
+            if (event.key == pygame.K_LEFT or event.key == pygame.K_a) and direction_command == 1:
                 direction_command = direction
-            if event.key == pygame.K_UP and direction_command == 2:
+            if (event.key == pygame.K_UP or event.key == pygame.K_w) and direction_command == 2:
                 direction_command = direction
-            if event.key == pygame.K_DOWN and direction_command == 3:
+            if (event.key == pygame.K_DOWN or event.key == pygame.K_s) and direction_command == 3:
                 direction_command = direction
 
     if direction_command == 0 and turns_allowed[0]:
