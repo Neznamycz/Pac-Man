@@ -7,29 +7,20 @@ import os
 
 pygame.init()
 
-# Dostupná rozlišení (v poměru 900:950)
-AVAILABLE_RESOLUTIONS = [
-    (900, 950),
-    (1080, 1140),
-    (1260, 1330),
-    (1440, 1520)
-]
-
 # Načtení nastavení
 def load_settings():
     default_settings = {
-        'resolution': 0,  # Index do AVAILABLE_RESOLUTIONS
-        'fullscreen': False
+        'fullscreen': False,
+        'selected_character': 'Oranžáda'
     }
     if os.path.exists('settings.json'):
         try:
             with open('settings.json', 'r', encoding='utf-8') as f:
                 settings = json.load(f)
-                # Ověřit validitu
-                if 'resolution' not in settings or settings['resolution'] >= len(AVAILABLE_RESOLUTIONS):
-                    settings['resolution'] = 0
                 if 'fullscreen' not in settings:
                     settings['fullscreen'] = False
+                if 'selected_character' not in settings:
+                    settings['selected_character'] = 'Oranžáda'
                 return settings
         except:
             return default_settings
@@ -40,15 +31,15 @@ def save_settings(settings):
         json.dump(settings, f, ensure_ascii=False, indent=2)
 
 def apply_settings(settings):
-    global WIDTH, HEIGHT, screen
-    WIDTH, HEIGHT = AVAILABLE_RESOLUTIONS[settings['resolution']]
+    global screen
     flags = (pygame.FULLSCREEN | pygame.SCALED) if settings['fullscreen'] else 0
     screen = pygame.display.set_mode([WIDTH, HEIGHT], flags)
     pygame.display.set_caption('PAC-MAN')
 
 game_settings = load_settings()
 
-WIDTH, HEIGHT = AVAILABLE_RESOLUTIONS[game_settings['resolution']]
+WIDTH = 900
+HEIGHT = 950
 screen = pygame.display.set_mode([WIDTH, HEIGHT], (pygame.FULLSCREEN | pygame.SCALED) if game_settings['fullscreen'] else 0)
 pygame.display.set_caption('PAC-MAN')
 timer = pygame.time.Clock()
@@ -57,9 +48,27 @@ font = pygame.font.Font('freesansbold.ttf', 20)
 level = copy.deepcopy(boards)
 color = 'blue'
 PI = math.pi
-player_images = []
-for i in range(1, 5):
-    player_images.append(pygame.transform.scale(pygame.image.load(f'assets/player_images/{i}.png'), (45, 45)))
+
+# Funkce pro načtení obrázků charakteru
+def load_character_images(character_name):
+    images = []
+    if character_name == 'Oranžáda':
+        prefix = ''
+    elif character_name == 'Mecha':
+        prefix = 'mecha'
+    elif character_name == 'Silver':
+        prefix = 'silver'
+    else:
+        prefix = ''
+    
+    for i in range(1, 5):
+        if prefix:
+            images.append(pygame.transform.scale(pygame.image.load(f'assets/player_images/{prefix}{i}.png'), (45, 45)))
+        else:
+            images.append(pygame.transform.scale(pygame.image.load(f'assets/player_images/{i}.png'), (45, 45)))
+    return images
+
+player_images = load_character_images(game_settings['selected_character'])
 blinky_img = pygame.transform.scale(pygame.image.load(f'assets/ghost_images/red.png'), (45, 45))
 pinky_img = pygame.transform.scale(pygame.image.load(f'assets/ghost_images/pink.png'), (45, 45))
 inky_img = pygame.transform.scale(pygame.image.load(f'assets/ghost_images/blue.png'), (45, 45))
@@ -105,12 +114,26 @@ ghost_speeds = [2, 2, 2, 2]
 startup_counter = 0
 lives = 3
 game_over = False
+game_paused = False
 main_menu = True
 show_scoreboard = False
 show_settings = False
+show_settings_from_pause = False
+show_character_select = False
 entering_name = False
 player_name = ""
 current_level = 1
+restart_rect = pygame.Rect(0, 0, 0, 0)
+menu_rect = pygame.Rect(0, 0, 0, 0)
+settings_rect = pygame.Rect(0, 0, 0, 0)
+continue_rect = pygame.Rect(0, 0, 0, 0)
+character_rect = pygame.Rect(0, 0, 0, 0)
+
+# Dev konzole
+dev_console_open = False
+console_input = ""
+console_history = []
+god_mode = False  # Neviditelnost pro duchy
 
 # Načtení scoreboardu
 def load_scoreboard():
@@ -747,10 +770,7 @@ def draw_misc():
     for i in range(lives):
         screen.blit(pygame.transform.scale(player_images[0], (30, 30)), (650 + i * 40, 915))
     if game_over:
-        pygame.draw.rect(screen, 'white', [50, 200, 800, 300],0, 10)
-        pygame.draw.rect(screen, 'dark gray', [70, 220, 760, 260], 0, 10)
-        gameover_text = font.render('Game over! Stiskni MEZERNÍK pro restart!', True, 'red')
-        screen.blit(gameover_text, (100, 300))
+        restart_rect, menu_rect = draw_game_over_menu()
 
 
 def check_collisions(scor, power, power_count, eaten_ghosts):
@@ -901,6 +921,60 @@ def draw_scoreboard():
     return back_rect
 
 
+def draw_character_select():
+    screen.fill('black')
+    title_font = pygame.font.Font('freesansbold.ttf', 60)
+    title_text = title_font.render('VÝBĚR CHARAKTERU', True, 'yellow')
+    screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, 50))
+    
+    # Seznam charakterů
+    characters = ['Oranžáda', 'Mecha', 'Silver']
+    
+    # Mapování náhledů
+    character_previews = {
+        'Oranžáda': pygame.transform.scale(pygame.image.load('assets/player_images/1.png'), (60, 60)),
+        'Mecha': pygame.transform.scale(pygame.image.load('assets/player_images/mecha1.png'), (60, 60)),
+        'Silver': pygame.transform.scale(pygame.image.load('assets/player_images/silver1.png'), (60, 60))
+    }
+    
+    char_font = pygame.font.Font('freesansbold.ttf', 35)
+    char_rects = []
+    
+    y_start = 250
+    for i, char_name in enumerate(characters):
+        y_pos = y_start + i * 100
+        
+        # Box pro charakter
+        char_rect = pygame.Rect(WIDTH // 2 - 300, y_pos, 600, 80)
+        
+        # Zvýraznit vybraný charakter
+        if game_settings['selected_character'] == char_name:
+            pygame.draw.rect(screen, 'green', char_rect, 0, 10)
+            pygame.draw.rect(screen, 'yellow', char_rect, 5, 10)
+        else:
+            pygame.draw.rect(screen, 'dark gray', char_rect, 0, 10)
+            pygame.draw.rect(screen, 'white', char_rect, 3, 10)
+        
+        # Náhled obrázku charakteru
+        preview_image = character_previews[char_name]
+        screen.blit(preview_image, (WIDTH // 2 - 280, y_pos + 10))
+        
+        # Jméno charakteru
+        char_text = char_font.render(char_name, True, 'white')
+        screen.blit(char_text, (WIDTH // 2 - 180, y_pos + 22))
+        
+        char_rects.append((char_rect, char_name))
+    
+    # Tlačítko zpět
+    back_font = pygame.font.Font('freesansbold.ttf', 35)
+    back_text = back_font.render('Zpět', True, 'white')
+    back_rect = pygame.Rect(WIDTH // 2 - 100, 800, 200, 50)
+    pygame.draw.rect(screen, 'red', back_rect, 3)
+    screen.blit(back_text, (WIDTH // 2 - back_text.get_width() // 2, 808))
+    
+    return char_rects, back_rect
+
+
 def draw_name_input(current_score):
     screen.fill('black')
     title_font = pygame.font.Font('freesansbold.ttf', 50)
@@ -928,6 +1002,223 @@ def draw_name_input(current_score):
     screen.blit(hint_text, (WIDTH // 2 - hint_text.get_width() // 2, 550))
 
 
+def draw_game_over_menu():
+    pygame.draw.rect(screen, 'white', [50, 200, 800, 300], 0, 10)
+    pygame.draw.rect(screen, 'dark gray', [70, 220, 760, 260], 0, 10)
+    
+    title_font = pygame.font.Font('freesansbold.ttf', 60)
+    title_text = title_font.render('GAME OVER', True, 'red')
+    screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, 250))
+    
+    button_font = pygame.font.Font('freesansbold.ttf', 35)
+    
+    # Tlačítko Znovu
+    restart_rect = pygame.Rect(WIDTH // 2 - 250, 350, 200, 60)
+    pygame.draw.rect(screen, 'green', restart_rect, 0, 10)
+    pygame.draw.rect(screen, 'white', restart_rect, 3, 10)
+    restart_text = button_font.render('Znovu', True, 'white')
+    screen.blit(restart_text, (restart_rect.centerx - restart_text.get_width() // 2, restart_rect.centery - restart_text.get_height() // 2))
+    
+    # Tlačítko Menu
+    menu_rect = pygame.Rect(WIDTH // 2 + 50, 350, 200, 60)
+    pygame.draw.rect(screen, 'blue', menu_rect, 0, 10)
+    pygame.draw.rect(screen, 'white', menu_rect, 3, 10)
+    menu_text = button_font.render('Menu', True, 'white')
+    screen.blit(menu_text, (menu_rect.centerx - menu_text.get_width() // 2, menu_rect.centery - menu_text.get_height() // 2))
+    
+    return restart_rect, menu_rect
+
+
+def draw_pause_menu():
+    # Průhledné pozadí
+    overlay = pygame.Surface((WIDTH, HEIGHT))
+    overlay.set_alpha(180)
+    overlay.fill((0, 0, 0))
+    screen.blit(overlay, (0, 0))
+    
+    # Průhledný menu box
+    menu_box_surface = pygame.Surface((500, 450))
+    menu_box_surface.set_alpha(200)
+    menu_box_surface.fill((40, 40, 40))
+    screen.blit(menu_box_surface, (WIDTH // 2 - 250, 200))
+    
+    menu_box = pygame.Rect(WIDTH // 2 - 250, 200, 500, 450)
+    pygame.draw.rect(screen, 'white', menu_box, 5, 15)
+    
+    # Titulek
+    title_font = pygame.font.Font('freesansbold.ttf', 60)
+    title_text = title_font.render('PAUZA', True, 'yellow')
+    screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, 240))
+    
+    button_font = pygame.font.Font('freesansbold.ttf', 35)
+    
+    # Tlačítko Pokračovat
+    continue_rect = pygame.Rect(WIDTH // 2 - 150, 340, 300, 60)
+    pygame.draw.rect(screen, 'green', continue_rect, 0, 10)
+    pygame.draw.rect(screen, 'white', continue_rect, 3, 10)
+    continue_text = button_font.render('Pokračovat', True, 'white')
+    screen.blit(continue_text, (continue_rect.centerx - continue_text.get_width() // 2, continue_rect.centery - continue_text.get_height() // 2))
+    
+    # Tlačítko Znovu
+    restart_rect = pygame.Rect(WIDTH // 2 - 150, 420, 300, 60)
+    pygame.draw.rect(screen, 'orange', restart_rect, 0, 10)
+    pygame.draw.rect(screen, 'white', restart_rect, 3, 10)
+    restart_text = button_font.render('Znovu', True, 'white')
+    screen.blit(restart_text, (restart_rect.centerx - restart_text.get_width() // 2, restart_rect.centery - restart_text.get_height() // 2))
+    
+    # Tlačítko Nastavení
+    settings_rect = pygame.Rect(WIDTH // 2 - 150, 500, 300, 60)
+    pygame.draw.rect(screen, 'blue', settings_rect, 0, 10)
+    pygame.draw.rect(screen, 'white', settings_rect, 3, 10)
+    settings_text = button_font.render('Nastavení', True, 'white')
+    screen.blit(settings_text, (settings_rect.centerx - settings_text.get_width() // 2, settings_rect.centery - settings_text.get_height() // 2))
+    
+    # Tlačítko Menu
+    menu_rect = pygame.Rect(WIDTH // 2 - 150, 580, 300, 60)
+    pygame.draw.rect(screen, 'red', menu_rect, 0, 10)
+    pygame.draw.rect(screen, 'white', menu_rect, 3, 10)
+    menu_text = button_font.render('Hlavní Menu', True, 'white')
+    screen.blit(menu_text, (menu_rect.centerx - menu_text.get_width() // 2, menu_rect.centery - menu_text.get_height() // 2))
+    
+    return continue_rect, restart_rect, settings_rect, menu_rect
+
+
+def draw_dev_console():
+    # Průhledné pozadí konzole
+    console_surface = pygame.Surface((WIDTH, 300))
+    console_surface.set_alpha(220)
+    console_surface.fill((20, 20, 20))
+    screen.blit(console_surface, (0, HEIGHT - 300))
+    
+    # Okraj konzole
+    pygame.draw.rect(screen, 'cyan', (0, HEIGHT - 300, WIDTH, 300), 3)
+    
+    # Titulek
+    title_font = pygame.font.Font('freesansbold.ttf', 20)
+    title_text = title_font.render('DEV CONSOLE - Stiskni ` pro zavření', True, 'cyan')
+    screen.blit(title_text, (10, HEIGHT - 290))
+    
+    # Historie příkazů (poslední 8)
+    history_font = pygame.font.Font('freesansbold.ttf', 16)
+    y_pos = HEIGHT - 260
+    for i, line in enumerate(console_history[-8:]):
+        history_line = history_font.render(line, True, 'white')
+        screen.blit(history_line, (10, y_pos))
+        y_pos += 20
+    
+    # Vstupní řádek
+    pygame.draw.rect(screen, 'white', (5, HEIGHT - 50, WIDTH - 10, 40), 2)
+    input_font = pygame.font.Font('freesansbold.ttf', 20)
+    prompt_text = input_font.render('> ' + console_input, True, 'lime')
+    screen.blit(prompt_text, (10, HEIGHT - 45))
+
+
+def execute_console_command(command):
+    global lives, score, current_level, level, god_mode, powerup, power_counter, game_over
+    global player_x, player_y, direction, direction_command, startup_counter
+    global blinky_dead, inky_dead, clyde_dead, pinky_dead, eaten_ghost
+    global blinky_x, blinky_y, blinky_direction, inky_x, inky_y, inky_direction
+    global pinky_x, pinky_y, pinky_direction, clyde_x, clyde_y, clyde_direction
+    
+    command = command.strip().lower()
+    
+    if command == 'help':
+        console_history.append('> ' + command)
+        console_history.append('Příkazy: die, restart, next, god, lives [n], score [n], level [n], power, kill')
+    elif command == 'die':
+        console_history.append('> ' + command)
+        if lives > 0:
+            lives -= 1
+            console_history.append(f'Odebrán život. Zbývá: {lives}')
+        else:
+            console_history.append('Žádné životy k odebrání!')
+    elif command == 'restart':
+        console_history.append('> ' + command)
+        score = 0
+        lives = 3
+        current_level = 1
+        level = copy.deepcopy(boards)
+        powerup = False
+        power_counter = 0
+        player_x = 450
+        player_y = 663
+        direction = 0
+        direction_command = 0
+        startup_counter = 0
+        game_over = False
+        # Reset duchů
+        blinky_x = 56
+        blinky_y = 58
+        blinky_direction = 0
+        inky_x = 440
+        inky_y = 388
+        inky_direction = 2
+        pinky_x = 440
+        pinky_y = 438
+        pinky_direction = 2
+        clyde_x = 440
+        clyde_y = 438
+        clyde_direction = 2
+        eaten_ghost = [False, False, False, False]
+        blinky_dead = False
+        inky_dead = False
+        clyde_dead = False
+        pinky_dead = False
+        console_history.append('Hra restartována!')
+    elif command == 'next':
+        console_history.append('> ' + command)
+        current_level += 1
+        level = copy.deepcopy(boards)
+        player_x = 450
+        player_y = 663
+        startup_counter = 0
+        console_history.append(f'Přesun na level {current_level}')
+    elif command == 'god':
+        console_history.append('> ' + command)
+        god_mode = not god_mode
+        console_history.append(f'God mode: {"ON" if god_mode else "OFF"}')
+    elif command == 'power':
+        console_history.append('> ' + command)
+        powerup = True
+        power_counter = 0
+        eaten_ghost = [False, False, False, False]
+        console_history.append('Power-up aktivován!')
+    elif command == 'kill':
+        console_history.append('> ' + command)
+        blinky_dead = True
+        inky_dead = True
+        clyde_dead = True
+        pinky_dead = True
+        console_history.append('Všichni duchové zabiti!')
+    elif command.startswith('lives '):
+        console_history.append('> ' + command)
+        try:
+            lives = int(command.split()[1])
+            console_history.append(f'Životy nastaveny na: {lives}')
+        except:
+            console_history.append('Chyba: lives [číslo]')
+    elif command.startswith('score '):
+        console_history.append('> ' + command)
+        try:
+            score = int(command.split()[1])
+            console_history.append(f'Skóre nastaveno na: {score}')
+        except:
+            console_history.append('Chyba: score [číslo]')
+    elif command.startswith('level '):
+        console_history.append('> ' + command)
+        try:
+            current_level = int(command.split()[1])
+            level = copy.deepcopy(boards)
+            console_history.append(f'Level nastaven na: {current_level}')
+        except:
+            console_history.append('Chyba: level [číslo]')
+    elif command == '':
+        pass
+    else:
+        console_history.append('> ' + command)
+        console_history.append('Neznámý příkaz. Napiš "help" pro seznam.')
+
+
 def draw_settings():
     screen.fill('black')
     title_font = pygame.font.Font('freesansbold.ttf', 60)
@@ -936,30 +1227,10 @@ def draw_settings():
     
     settings_font = pygame.font.Font('freesansbold.ttf', 35)
     
-    # Rozlišení
-    res_label = settings_font.render('Rozli\u0161en\u00ed:', True, 'white')
-    screen.blit(res_label, (150, 200))
-    
-    resolution_rects = []
-    for i, (w, h) in enumerate(AVAILABLE_RESOLUTIONS):
-        y_pos = 270 + i * 70
-        res_text = settings_font.render(f'{w}x{h}', True, 'white')
-        res_rect = pygame.Rect(200, y_pos, 500, 50)
-        
-        if game_settings['resolution'] == i:
-            pygame.draw.rect(screen, 'green', res_rect, 3)
-            pygame.draw.circle(screen, 'green', (180, y_pos + 25), 8)
-        else:
-            pygame.draw.rect(screen, 'gray', res_rect, 3)
-            pygame.draw.circle(screen, 'gray', (180, y_pos + 25), 8, 2)
-        
-        if False:  # Skryto - rozlišení není viditelné
-            screen.blit(res_text, (220, y_pos + 8))
-    
     # Fullscreen
-    fullscreen_y = 270 + len(AVAILABLE_RESOLUTIONS) * 70 + 30
+    fullscreen_y = 270
     fs_label = settings_font.render('Re\u017eim:', True, 'white')
-    screen.blit(fs_label, (150, fullscreen_y))
+    screen.blit(fs_label, (WIDTH // 2 - fs_label.get_width() // 2, fullscreen_y))
     
     fs_rect = pygame.Rect(200, fullscreen_y + 70, 500, 50)
     fs_text = settings_font.render(
@@ -987,7 +1258,7 @@ def draw_settings():
     screen.blit(apply_text, (WIDTH // 2 - 250 + (200 - apply_text.get_width()) // 2, HEIGHT - 142))
     screen.blit(back_text, (WIDTH // 2 + 50 + (200 - back_text.get_width()) // 2, HEIGHT - 142))
     
-    return resolution_rects, fs_rect, apply_rect, back_rect
+    return fs_rect, apply_rect, back_rect
 
 
 def draw_menu():
@@ -1012,19 +1283,25 @@ def draw_menu():
     pygame.draw.rect(screen, 'green', scoreboard_rect, 3)
     screen.blit(scoreboard_text, (WIDTH // 2 - scoreboard_text.get_width() // 2, 410))
     
+    # Charakter
+    character_text = menu_font.render('Charakter', True, 'white')
+    character_rect = pygame.Rect(WIDTH // 2 - 150, 500, 300, 60)
+    pygame.draw.rect(screen, 'purple', character_rect, 3)
+    screen.blit(character_text, (WIDTH // 2 - character_text.get_width() // 2, 510))
+    
     # Nastaveni
-    settings_text = menu_font.render('Nastaven\u00ed', True, 'white')
-    settings_rect = pygame.Rect(WIDTH // 2 - 150, 500, 300, 60)
+    settings_text = menu_font.render('Nastavení', True, 'white')
+    settings_rect = pygame.Rect(WIDTH // 2 - 150, 600, 300, 60)
     pygame.draw.rect(screen, 'orange', settings_rect, 3)
-    screen.blit(settings_text, (WIDTH // 2 - settings_text.get_width() // 2, 510))
+    screen.blit(settings_text, (WIDTH // 2 - settings_text.get_width() // 2, 610))
     
     # Odejít
     quit_text = menu_font.render('Odejít', True, 'white')
-    quit_rect = pygame.Rect(WIDTH // 2 - 150, 600, 300, 60)
+    quit_rect = pygame.Rect(WIDTH // 2 - 150, 700, 300, 60)
     pygame.draw.rect(screen, 'red', quit_rect, 3)
-    screen.blit(quit_text, (WIDTH // 2 - quit_text.get_width() // 2, 610))
+    screen.blit(quit_text, (WIDTH // 2 - quit_text.get_width() // 2, 710))
     
-    return play_rect, scoreboard_rect, settings_rect, quit_rect
+    return play_rect, scoreboard_rect, character_rect, settings_rect, quit_rect
 
 
 def get_targets(blink_x, blink_y, ink_x, ink_y, pink_x, pink_y, clyd_x, clyd_y):
@@ -1110,6 +1387,195 @@ run = True
 while run:
     timer.tick(fps)
     
+    if game_paused and not show_settings_from_pause:
+        # Zobrazit pause menu
+        continue_rect, restart_rect, settings_rect, menu_rect = draw_pause_menu()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    game_paused = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                if continue_rect.collidepoint(mouse_pos):
+                    # Pokračovat ve hře
+                    game_paused = False
+                elif restart_rect.collidepoint(mouse_pos):
+                    # Restart hry
+                    powerup = False
+                    power_counter = 0
+                    lives = 3
+                    startup_counter = 0
+                    player_x = 450
+                    player_y = 663
+                    direction = 0
+                    direction_command = 0
+                    blinky_x = 56
+                    blinky_y = 58
+                    blinky_direction = 0
+                    inky_x = 440
+                    inky_y = 388
+                    inky_direction = 2
+                    pinky_x = 440
+                    pinky_y = 438
+                    pinky_direction = 2
+                    clyde_x = 440
+                    clyde_y = 438
+                    clyde_direction = 2
+                    eaten_ghost = [False, False, False, False]
+                    blinky_dead = False
+                    inky_dead = False
+                    clyde_dead = False
+                    pinky_dead = False
+                    score = 0
+                    level = copy.deepcopy(boards)
+                    game_paused = False
+                    current_level = 1
+                elif settings_rect.collidepoint(mouse_pos):
+                    # Otevřít nastavení z pauzy
+                    show_settings_from_pause = True
+                elif menu_rect.collidepoint(mouse_pos):
+                    # Návrat do hlavního menu
+                    powerup = False
+                    power_counter = 0
+                    lives = 3
+                    startup_counter = 0
+                    player_x = 450
+                    player_y = 663
+                    direction = 0
+                    direction_command = 0
+                    blinky_x = 56
+                    blinky_y = 58
+                    blinky_direction = 0
+                    inky_x = 440
+                    inky_y = 388
+                    inky_direction = 2
+                    pinky_x = 440
+                    pinky_y = 438
+                    pinky_direction = 2
+                    clyde_x = 440
+                    clyde_y = 438
+                    clyde_direction = 2
+                    eaten_ghost = [False, False, False, False]
+                    blinky_dead = False
+                    inky_dead = False
+                    clyde_dead = False
+                    pinky_dead = False
+                    score = 0
+                    level = copy.deepcopy(boards)
+                    game_paused = False
+                    current_level = 1
+                    main_menu = True
+        
+        pygame.display.flip()
+        continue
+    
+    if show_settings_from_pause:
+        # Zobrazit nastavení z pauzy
+        fs_rect, apply_rect, back_rect = draw_settings()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                
+                # Kliknutí na fullscreen přepínač
+                if fs_rect.collidepoint(mouse_pos):
+                    game_settings['fullscreen'] = not game_settings['fullscreen']
+                
+                # Použít nastavení
+                if apply_rect.collidepoint(mouse_pos):
+                    save_settings(game_settings)
+                    apply_settings(game_settings)
+                    show_settings_from_pause = False
+                
+                # Zpět do pauzy
+                if back_rect.collidepoint(mouse_pos):
+                    game_settings = load_settings()
+                    show_settings_from_pause = False
+        
+        pygame.display.flip()
+        continue
+    
+    if game_over:
+        # Zobrazit game over menu
+        restart_rect, menu_rect = draw_game_over_menu()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                if restart_rect.collidepoint(mouse_pos):
+                    # Restart hry
+                    powerup = False
+                    power_counter = 0
+                    lives = 3
+                    startup_counter = 0
+                    player_x = 450
+                    player_y = 663
+                    direction = 0
+                    direction_command = 0
+                    blinky_x = 56
+                    blinky_y = 58
+                    blinky_direction = 0
+                    inky_x = 440
+                    inky_y = 388
+                    inky_direction = 2
+                    pinky_x = 440
+                    pinky_y = 438
+                    pinky_direction = 2
+                    clyde_x = 440
+                    clyde_y = 438
+                    clyde_direction = 2
+                    eaten_ghost = [False, False, False, False]
+                    blinky_dead = False
+                    inky_dead = False
+                    clyde_dead = False
+                    pinky_dead = False
+                    score = 0
+                    level = copy.deepcopy(boards)
+                    game_over = False
+                    current_level = 1
+                elif menu_rect.collidepoint(mouse_pos):
+                    # Návrat do hlavního menu
+                    powerup = False
+                    power_counter = 0
+                    lives = 3
+                    startup_counter = 0
+                    player_x = 450
+                    player_y = 663
+                    direction = 0
+                    direction_command = 0
+                    blinky_x = 56
+                    blinky_y = 58
+                    blinky_direction = 0
+                    inky_x = 440
+                    inky_y = 388
+                    inky_direction = 2
+                    pinky_x = 440
+                    pinky_y = 438
+                    pinky_direction = 2
+                    clyde_x = 440
+                    clyde_y = 438
+                    clyde_direction = 2
+                    eaten_ghost = [False, False, False, False]
+                    blinky_dead = False
+                    inky_dead = False
+                    clyde_dead = False
+                    pinky_dead = False
+                    score = 0
+                    level = copy.deepcopy(boards)
+                    game_over = False
+                    current_level = 1
+                    main_menu = True
+        
+        pygame.display.flip()
+        continue
+    
     if entering_name:
         # Zadávání jména po hře
         draw_name_input(score)
@@ -1153,9 +1619,9 @@ while run:
         pygame.display.flip()
         continue
     
-    if show_settings:
-        # Zobrazit nastavení
-        resolution_rects, fs_rect, apply_rect, back_rect = draw_settings()
+    if show_character_select:
+        # Zobrazit výběr charakteru
+        char_rects, back_rect = draw_character_select()
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1163,11 +1629,31 @@ while run:
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = pygame.mouse.get_pos()
                 
-                # Kliknutí na rozlišení - skryto
-                if False:
-                    for i, rect in enumerate(resolution_rects):
-                        if rect.collidepoint(mouse_pos):
-                            game_settings['resolution'] = i
+                # Kliknutí na charakter
+                for char_rect, char_name in char_rects:
+                    if char_rect.collidepoint(mouse_pos):
+                        game_settings['selected_character'] = char_name
+                        save_settings(game_settings)
+                        # Znovu načíst obrázky charakteru
+                        player_images = load_character_images(char_name)
+                
+                # Zpět do menu
+                if back_rect.collidepoint(mouse_pos):
+                    show_character_select = False
+                    main_menu = True
+        
+        pygame.display.flip()
+        continue
+    
+    if show_settings:
+        # Zobrazit nastavení
+        fs_rect, apply_rect, back_rect = draw_settings()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
                 
                 # Kliknutí na fullscreen přepínač
                 if fs_rect.collidepoint(mouse_pos):
@@ -1191,7 +1677,7 @@ while run:
     
     if main_menu:
         # Zobrazit menu
-        play_rect, scoreboard_rect, settings_rect, quit_rect = draw_menu()
+        play_rect, scoreboard_rect, character_rect, settings_rect, quit_rect = draw_menu()
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1233,6 +1719,9 @@ while run:
                 elif scoreboard_rect.collidepoint(mouse_pos):
                     main_menu = False
                     show_scoreboard = True
+                elif character_rect.collidepoint(mouse_pos):
+                    main_menu = False
+                    show_character_select = True
                 elif settings_rect.collidepoint(mouse_pos):
                     main_menu = False
                     show_settings = True
@@ -1354,7 +1843,7 @@ while run:
         clyde_x, clyde_y, clyde_direction = clyde.move_clyde()
     score, powerup, power_counter, eaten_ghost = check_collisions(score, powerup, power_counter, eaten_ghost)
     # add to if not powerup to check if eaten ghosts
-    if not powerup:
+    if not powerup and not god_mode:
         if (player_circle.colliderect(blinky.rect) and not blinky.dead) or \
                 (player_circle.colliderect(inky.rect) and not inky.dead) or \
                 (player_circle.colliderect(pinky.rect) and not pinky.dead) or \
@@ -1554,45 +2043,34 @@ while run:
         if event.type == pygame.QUIT:
             run = False
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_RIGHT or event.key == pygame.K_d:
-                direction_command = 0
-            if event.key == pygame.K_LEFT or event.key == pygame.K_a:
-                direction_command = 1
-            if event.key == pygame.K_UP or event.key == pygame.K_w:
-                direction_command = 2
-            if event.key == pygame.K_DOWN or event.key == pygame.K_s:
-                direction_command = 3
-            if event.key == pygame.K_SPACE and game_over:
-                powerup = False
-                power_counter = 0
-                lives -= 1
-                startup_counter = 0
-                player_x = 450
-                player_y = 663
-                direction = 0
-                direction_command = 0
-                blinky_x = 56
-                blinky_y = 58
-                blinky_direction = 0
-                inky_x = 440
-                inky_y = 388
-                inky_direction = 2
-                pinky_x = 440
-                pinky_y = 438
-                pinky_direction = 2
-                clyde_x = 440
-                clyde_y = 438
-                clyde_direction = 2
-                eaten_ghost = [False, False, False, False]
-                blinky_dead = False
-                inky_dead = False
-                clyde_dead = False
-                pinky_dead = False
-                score = 0
-                lives = 3
-                level = copy.deepcopy(boards)
-                game_over = False
-                current_level = 1
+            # Dev konzole toggle
+            if event.key == pygame.K_BACKQUOTE:  # Klávesa `
+                dev_console_open = not dev_console_open
+                if not dev_console_open:
+                    console_input = ""
+            
+            # Pokud je konzole otevřená, zpracuj vstup
+            elif dev_console_open:
+                if event.key == pygame.K_RETURN:
+                    execute_console_command(console_input)
+                    console_input = ""
+                elif event.key == pygame.K_BACKSPACE:
+                    console_input = console_input[:-1]
+                elif event.unicode.isprintable() and len(console_input) < 50:
+                    console_input += event.unicode
+            
+            # Normální herní ovládání (pouze když konzole není otevřená)
+            elif not dev_console_open:
+                if event.key == pygame.K_ESCAPE:
+                    game_paused = True
+                if event.key == pygame.K_RIGHT or event.key == pygame.K_d:
+                    direction_command = 0
+                if event.key == pygame.K_LEFT or event.key == pygame.K_a:
+                    direction_command = 1
+                if event.key == pygame.K_UP or event.key == pygame.K_w:
+                    direction_command = 2
+                if event.key == pygame.K_DOWN or event.key == pygame.K_s:
+                    direction_command = 3
 
         if event.type == pygame.KEYUP:
             if (event.key == pygame.K_RIGHT or event.key == pygame.K_d) and direction_command == 0:
@@ -1626,6 +2104,16 @@ while run:
         pinky_dead = False
     if clyde.in_box and clyde_dead:
         clyde_dead = False
+
+    # Vykreslení dev konzole na konci (přes vše ostatní)
+    if dev_console_open:
+        draw_dev_console()
+    
+    # Indikátor god mode
+    if god_mode:
+        god_font = pygame.font.Font('freesansbold.ttf', 16)
+        god_text = god_font.render('GOD MODE: ON', True, 'yellow')
+        screen.blit(god_text, (WIDTH - 140, 10))
 
     pygame.display.flip()
 pygame.quit()
